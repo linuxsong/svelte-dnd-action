@@ -64,6 +64,7 @@ let multiScroller;
 let touchDragHoldTimer;
 let touchHoldElapsed = false;
 let useCursorForDetectionActive = false;
+let originalElementRect; // rect of the original element when drag started, for transformDraggedElement
 
 // a map from type to a set of drop-zones
 const typeToDropZones = new Map();
@@ -502,6 +503,8 @@ export function dndzone(node, options) {
         useCursorForDetectionActive = useCursorForDetection;
 
         // creating the draggable element
+        // save the original element rect before it gets hidden/moved, for transformDraggedElement
+        originalElementRect = originalDragTarget.getBoundingClientRect();
         draggedEl = createDraggedElementFrom(originalDragTarget, centreDraggedOnCursor && currentMousePosition);
         originDropZoneRoot.appendChild(draggedEl);
         // We will keep the original dom node in the dom because touch events keep firing on it, we want to re-add it after the framework removes it
@@ -631,7 +634,10 @@ export function dndzone(node, options) {
                 if (!morphDisabled) {
                     morphDraggedElementToBeLike(draggedEl, draggableEl, currentMousePosition.x, currentMousePosition.y);
                 }
-                config.transformDraggedElement(draggedEl, draggedElData, idx, dragStartMousePosition);
+                config.transformDraggedElement(draggedEl, draggedElData, idx, {
+                    dragStartMousePosition,
+                    originalElementRect
+                });
                 decorateShadowEl(draggableEl);
                 continue;
             }

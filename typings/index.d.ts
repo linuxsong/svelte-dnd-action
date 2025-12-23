@@ -37,11 +37,18 @@ export declare function dragHandle(node: HTMLElement): {
     destroy: () => void;
 };
 
+export interface DragContext {
+    /** Mouse position (clientX, clientY) when drag started */
+    dragStartMousePosition: {x: number; y: number};
+    /** Bounding client rect of the original element when drag started */
+    originalElementRect: DOMRect;
+}
+
 export type TransformDraggedElementFunction = (
     element?: HTMLElement, // the dragged element.
     draggedElementData?: Item, // the data of the item from the items array
     index?: number, // the index the dragged element would get if dropped into the new dnd-zone
-    dragStartMousePosition?: {x: number; y: number} // the mouse position when drag started
+    dragContext?: DragContext // context about the drag operation
 ) => void;
 
 export declare type Item = Record<string, any>;
