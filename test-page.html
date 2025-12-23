@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>svelte-dnd-action Test - useCursorForDetection</title>
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background: #1a1a2e;
+                color: #fff;
+                padding: 40px;
+                min-height: 100vh;
+            }
+
+            h1 {
+                margin-bottom: 10px;
+                color: #eee;
+            }
+
+            .description {
+                color: #888;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
+
+            .container {
+                display: flex;
+                gap: 60px;
+            }
+
+            .section {
+                flex: 1;
+            }
+
+            .section h2 {
+                font-size: 16px;
+                margin-bottom: 15px;
+                color: #aaa;
+            }
+
+            /* Cards (large draggable items) */
+            .card-list {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                min-height: 300px;
+                padding: 15px;
+                background: #252542;
+                border-radius: 12px;
+            }
+
+            .card {
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 8px;
+                cursor: grab;
+                font-weight: 600;
+                font-size: 14px;
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+
+            .card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+            }
+
+            /* Folders (small drop targets) */
+            .folder-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .folder {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 10px 15px;
+                background: #252542;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: background 0.2s;
+                position: relative;
+            }
+
+            .folder:hover,
+            .folder.drag-over {
+                background: #3a3a5c;
+            }
+
+            .folder-icon {
+                font-size: 18px;
+            }
+
+            .folder-drop-zone {
+                position: absolute;
+                inset: 0;
+                border-radius: 8px;
+            }
+
+            .folder-drop-zone.active {
+                outline: 2px solid #667eea;
+                outline-offset: 2px;
+            }
+
+            /* Status indicator */
+            .status {
+                margin-top: 20px;
+                padding: 15px;
+                background: #252542;
+                border-radius: 8px;
+                font-size: 13px;
+                color: #888;
+            }
+
+            .status-item {
+                margin-bottom: 8px;
+            }
+
+            .status-label {
+                color: #666;
+            }
+
+            .status-value {
+                color: #667eea;
+                font-weight: 600;
+            }
+
+            /* Test scenarios */
+            .test-info {
+                margin-top: 40px;
+                padding: 20px;
+                background: #252542;
+                border-radius: 12px;
+            }
+
+            .test-info h3 {
+                font-size: 14px;
+                margin-bottom: 15px;
+                color: #aaa;
+            }
+
+            .test-case {
+                margin-bottom: 15px;
+                padding: 12px;
+                background: #1a1a2e;
+                border-radius: 8px;
+                font-size: 13px;
+            }
+
+            .test-case strong {
+                color: #667eea;
+            }
+
+            .test-case p {
+                color: #888;
+                margin-top: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>🧪 useCursorForDetection Test</h1>
+        <p class="description">测试 useCursorForDetection 选项：使用光标位置进行碰撞检测，而不是拖拽元素的中心</p>
+
+        <div class="container">
+            <div class="section">
+                <h2>📦 Cards (大卡片)</h2>
+                <div class="card-list" id="card-list">
+                    <div class="card" draggable="true" data-id="1">Card 1 - 拖动我到右边的文件夹</div>
+                    <div class="card" draggable="true" data-id="2">Card 2 - 测试最后一个文件夹</div>
+                    <div class="card" draggable="true" data-id="3">Card 3 - 观察检测是否稳定</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>📁 Folders (小目标)</h2>
+                <div class="folder-list" id="folder-list">
+                    <div class="folder" data-folder="work">
+                        <span class="folder-icon">📂</span>
+                        <span>Work</span>
+                    </div>
+                    <div class="folder" data-folder="personal">
+                        <span class="folder-icon">📂</span>
+                        <span>Personal</span>
+                    </div>
+                    <div class="folder" data-folder="archive">
+                        <span class="folder-icon">📂</span>
+                        <span>Archive</span>
+                    </div>
+                    <div class="folder" data-folder="last">
+                        <span class="folder-icon">📂</span>
+                        <span>Last Folder (重点测试)</span>
+                    </div>
+                </div>
+
+                <div class="status" id="status">
+                    <div class="status-item">
+                        <span class="status-label">当前拖拽:</span>
+                        <span class="status-value" id="dragging">无</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">悬停目标:</span>
+                        <span class="status-value" id="hovering">无</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">最后放置:</span>
+                        <span class="status-value" id="dropped">无</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-info">
+            <h3>📋 测试要点</h3>
+            <div class="test-case">
+                <strong>1. 最后文件夹检测</strong>
+                <p>拖动卡片到 "Last Folder"，检测应该稳定，不会间歇性丢失</p>
+            </div>
+            <div class="test-case">
+                <strong>2. 光标位置检测</strong>
+                <p>即使卡片很大，只要光标在文件夹区域内，就应该被检测到</p>
+            </div>
+            <div class="test-case">
+                <strong>3. 卡片不跳动</strong>
+                <p>拖动时卡片应该保持原始位置相对于光标，不应跳到光标中心</p>
+            </div>
+        </div>
+
+        <script>
+            // Simple drag and drop simulation (不使用 svelte-dnd-action)
+            // 这只是一个视觉测试页面
+
+            const cards = document.querySelectorAll(".card");
+            const folders = document.querySelectorAll(".folder");
+            const draggingEl = document.getElementById("dragging");
+            const hoveringEl = document.getElementById("hovering");
+            const droppedEl = document.getElementById("dropped");
+
+            let currentDragging = null;
+
+            cards.forEach(card => {
+                card.addEventListener("dragstart", e => {
+                    currentDragging = card.textContent.split(" - ")[0];
+                    draggingEl.textContent = currentDragging;
+                    card.style.opacity = "0.5";
+                });
+
+                card.addEventListener("dragend", e => {
+                    card.style.opacity = "1";
+                    currentDragging = null;
+                    draggingEl.textContent = "无";
+                    hoveringEl.textContent = "无";
+                    folders.forEach(f => f.classList.remove("drag-over"));
+                });
+            });
+
+            folders.forEach(folder => {
+                folder.addEventListener("dragover", e => {
+                    e.preventDefault();
+                    folder.classList.add("drag-over");
+                    hoveringEl.textContent = folder.dataset.folder;
+                });
+
+                folder.addEventListener("dragleave", e => {
+                    folder.classList.remove("drag-over");
+                    if (!e.relatedTarget || !folder.contains(e.relatedTarget)) {
+                        hoveringEl.textContent = "无";
+                    }
+                });
+
+                folder.addEventListener("drop", e => {
+                    e.preventDefault();
+                    folder.classList.remove("drag-over");
+                    droppedEl.textContent = `${currentDragging} → ${folder.dataset.folder}`;
+                });
+            });
+        </script>
+
+        <p style="margin-top: 40px; color: #666; font-size: 12px">
+            ⚠️ 这是一个简单的原生 HTML 测试页面。要测试完整的 svelte-dnd-action 功能，<br />
+            请在 chrome-cmp 扩展的 Options 页面中测试拖拽卡片到文件夹的功能。
+        </p>
+    </body>
+</html>
