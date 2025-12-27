@@ -137,27 +137,69 @@ function createShadowElData(draggedElData) {
 }
 
 /* custom drag-events handlers */
+// Helper to check if a zone is the origin zone, handling Svelte's DOM re-creation
+function isOriginZone(zone) {
+    if (zone === originDropZone) return true;
+    // If the original zone element is gone (destroyed by Svelte), we need to identify its replacement
+    if (!dzToConfig.has(originDropZone)) {
+        const config = dzToConfig.get(zone);
+        // Heuristic: If it has copyMode enabled AND contains the dragged item (by ID), it's the new origin
+        if (config && config.copyMode && config.items.some(i => i[ITEM_ID_KEY] === draggedElData[ITEM_ID_KEY])) {
+            // Update the reference so future checks are fast
+            originDropZone = zone;
+            return true;
+        }
+    }
+    return false;
+}
+
 function handleDraggedEntered(e) {
     printDebug(() => ["dragged entered", e.currentTarget, e.detail]);
-    let {items, dropFromOthersDisabled} = dzToConfig.get(e.currentTarget);
-    if (dropFromOthersDisabled && e.currentTarget !== originDropZone) {
+    let {items, dropFromOthersDisabled, copyMode} = dzToConfig.get(e.currentTarget);
+    if (dropFromOthersDisabled && !isOriginZone(e.currentTarget)) {
         printDebug(() => "ignoring dragged entered because drop is currently disabled");
         return;
     }
     isDraggedOutsideOfAnyDz = false;
+
+    // Helper to check if a zone is the origin zone, handling Svelte's DOM re-creation
+    // In copyMode, if this is the origin zone, we should NOT modify items at all.
+    // The original item was never removed, so any filtering or shadow insertion would corrupt the list.
+    if (copyMode && isOriginZone(e.currentTarget)) {
+        // Just dispatch original items completely unchanged
+        dispatchConsiderEvent(e.currentTarget, [...items], {
+            trigger: TRIGGERS.DRAGGED_ENTERED,
+            id: draggedElData[ITEM_ID_KEY],
+            source: SOURCES.POINTER
+        });
+        return;
+    }
+
     // this deals with another race condition. on some occasions (super rapid operations) the list hasn't updated yet
     items = items.filter(item => item[ITEM_ID_KEY] !== shadowElData[ITEM_ID_KEY] && item[ITEM_ID_KEY] !== SHADOW_PLACEHOLDER_ITEM_ID);
     printDebug(() => `dragged entered items ${toString(items)}`);
 
-    if (originDropZone !== e.currentTarget) {
-        const originZoneItems = dzToConfig.get(originDropZone).items;
-        const newOriginZoneItems = originZoneItems.filter(item => !item[SHADOW_ITEM_MARKER_PROPERTY_NAME]);
-        dispatchConsiderEvent(originDropZone, newOriginZoneItems, {
-            trigger: TRIGGERS.DRAGGED_ENTERED_ANOTHER,
-            id: draggedElData[ITEM_ID_KEY],
-            source: SOURCES.POINTER
-        });
+    if (!isOriginZone(e.currentTarget)) {
+        const originConfig = dzToConfig.get(originDropZone);
+        // In copyMode, the origin zone items should remain unchanged
+        // Just dispatch original items without any filtering
+        if (originConfig && originConfig.copyMode) {
+            dispatchConsiderEvent(originDropZone, [...originConfig.items], {
+                trigger: TRIGGERS.DRAGGED_ENTERED_ANOTHER,
+                id: draggedElData[ITEM_ID_KEY],
+                source: SOURCES.POINTER
+            });
+        } else if (originConfig) {
+            const originZoneItems = originConfig.items;
+            const newOriginZoneItems = originZoneItems.filter(item => !item[SHADOW_ITEM_MARKER_PROPERTY_NAME]);
+            dispatchConsiderEvent(originDropZone, newOriginZoneItems, {
+                trigger: TRIGGERS.DRAGGED_ENTERED_ANOTHER,
+                id: draggedElData[ITEM_ID_KEY],
+                source: SOURCES.POINTER
+            });
+        }
     }
+
     const {index: shadowElIdx} = e.detail.indexObj;
     shadowElDropZone = e.currentTarget;
     items.splice(shadowElIdx, 0, shadowElData);
@@ -168,11 +210,40 @@ function handleDraggedLeft(e) {
     // dealing with a rare race condition on extremely rapid clicking and dropping
     if (!isWorkingOnPreviousDrag) return;
     printDebug(() => ["dragged left", e.currentTarget, e.detail]);
-    const {items: originalItems, dropFromOthersDisabled} = dzToConfig.get(e.currentTarget);
-    if (dropFromOthersDisabled && e.currentTarget !== originDropZone && e.currentTarget !== shadowElDropZone) {
+    const {items: originalItems, dropFromOthersDisabled, copyMode} = dzToConfig.get(e.currentTarget);
+    if (dropFromOthersDisabled && !isOriginZone(e.currentTarget) && e.currentTarget !== shadowElDropZone) {
         printDebug(() => "drop is currently disabled");
         return;
     }
+
+    // In copyMode, if this is the origin zone, we should NOT modify items at all.
+    // The original item was never removed, so any shadow removal/insertion would corrupt the list.
+    if (copyMode && isOriginZone(e.currentTarget)) {
+        shadowElDropZone = undefined;
+        const {type, theOtherDz} = e.detail;
+        if (
+            type === DRAGGED_LEFT_TYPES.OUTSIDE_OF_ANY ||
+            (type === DRAGGED_LEFT_TYPES.LEFT_FOR_ANOTHER && !isOriginZone(theOtherDz) && dzToConfig.get(theOtherDz).dropFromOthersDisabled)
+        ) {
+            printDebug(() => "dragged left all (copyMode), notifying origin dz");
+            isDraggedOutsideOfAnyDz = true;
+            shadowElDropZone = originDropZone;
+            // Just dispatch original items unchanged
+            dispatchConsiderEvent(originDropZone, [...originalItems], {
+                trigger: TRIGGERS.DRAGGED_LEFT_ALL,
+                id: draggedElData[ITEM_ID_KEY],
+                source: SOURCES.POINTER
+            });
+        }
+        // Also dispatch DRAGGED_LEFT with original items unchanged
+        dispatchConsiderEvent(e.currentTarget, [...originalItems], {
+            trigger: TRIGGERS.DRAGGED_LEFT,
+            id: draggedElData[ITEM_ID_KEY],
+            source: SOURCES.POINTER
+        });
+        return;
+    }
+
     const items = [...originalItems];
     const shadowElIdx = findShadowElementIdx(items);
     if (shadowElIdx !== -1) {
@@ -183,19 +254,33 @@ function handleDraggedLeft(e) {
     const {type, theOtherDz} = e.detail;
     if (
         type === DRAGGED_LEFT_TYPES.OUTSIDE_OF_ANY ||
-        (type === DRAGGED_LEFT_TYPES.LEFT_FOR_ANOTHER && theOtherDz !== originDropZone && dzToConfig.get(theOtherDz).dropFromOthersDisabled)
+        (type === DRAGGED_LEFT_TYPES.LEFT_FOR_ANOTHER && !isOriginZone(theOtherDz) && dzToConfig.get(theOtherDz).dropFromOthersDisabled)
     ) {
         printDebug(() => "dragged left all, putting shadow element back in the origin dz");
         isDraggedOutsideOfAnyDz = true;
         shadowElDropZone = originDropZone;
-        // if the last zone it left is the origin dz, we will put it back into items (which we just removed it from)
-        const originZoneItems = origShadowDz === originDropZone ? items : [...dzToConfig.get(originDropZone).items];
-        originZoneItems.splice(originIndex, 0, shadowElData);
-        dispatchConsiderEvent(originDropZone, originZoneItems, {
-            trigger: TRIGGERS.DRAGGED_LEFT_ALL,
-            id: draggedElData[ITEM_ID_KEY],
-            source: SOURCES.POINTER
-        });
+
+        // In copyMode, the original item was never removed from origin zone,
+        // so we should NOT insert the shadow back (it would create a duplicate).
+        // Only dispatch the event to notify the origin zone.
+        const originConfig = dzToConfig.get(originDropZone);
+        if (originConfig && originConfig.copyMode) {
+            // copyMode: just dispatch with original items (no shadow insertion)
+            dispatchConsiderEvent(originDropZone, [...originConfig.items], {
+                trigger: TRIGGERS.DRAGGED_LEFT_ALL,
+                id: draggedElData[ITEM_ID_KEY],
+                source: SOURCES.POINTER
+            });
+        } else if (originConfig) {
+            // Normal mode: insert shadow back into origin zone
+            const originZoneItems = origShadowDz === originDropZone ? items : [...originConfig.items];
+            originZoneItems.splice(originIndex, 0, shadowElData);
+            dispatchConsiderEvent(originDropZone, originZoneItems, {
+                trigger: TRIGGERS.DRAGGED_LEFT_ALL,
+                id: draggedElData[ITEM_ID_KEY],
+                source: SOURCES.POINTER
+            });
+        }
     }
     // for the origin dz, when the dragged is outside of any, this will be fired in addition to the previous. this is for simplicity
     dispatchConsiderEvent(e.currentTarget, items, {
@@ -206,11 +291,24 @@ function handleDraggedLeft(e) {
 }
 function handleDraggedIsOverIndex(e) {
     printDebug(() => ["dragged is over index", e.currentTarget, e.detail]);
-    const {items: originalItems, dropFromOthersDisabled} = dzToConfig.get(e.currentTarget);
-    if (dropFromOthersDisabled && e.currentTarget !== originDropZone) {
+    const {items: originalItems, dropFromOthersDisabled, copyMode} = dzToConfig.get(e.currentTarget);
+    if (dropFromOthersDisabled && !isOriginZone(e.currentTarget)) {
         printDebug(() => "drop is currently disabled");
         return;
     }
+
+    // In copyMode, if this is the origin zone, we should NOT modify items.
+    // The original item was never removed, so inserting shadow would create duplicate.
+    if (copyMode && isOriginZone(e.currentTarget)) {
+        // Just dispatch original items unchanged
+        dispatchConsiderEvent(e.currentTarget, [...originalItems], {
+            trigger: TRIGGERS.DRAGGED_OVER_INDEX,
+            id: draggedElData[ITEM_ID_KEY],
+            source: SOURCES.POINTER
+        });
+        return;
+    }
+
     const items = [...originalItems];
     isDraggedOutsideOfAnyDz = false;
     const {index} = e.detail.indexObj;
@@ -271,12 +369,27 @@ function handleDrop() {
             source: SOURCES.POINTER
         });
         if (shadowElDropZone !== originDropZone) {
+            // Before dispatching to originDropZone, ensure the reference is still valid.
+            // Svelte may have recreated the DOM, making originDropZone point to a stale element.
+            // Note: dzToConfig.has may still return true due to delayed cleanup during drag,
+            // so we also check if the element is still in the document.
+            if (!dzToConfig.has(originDropZone) || !document.contains(originDropZone)) {
+                // originDropZone is stale, find the new one using the same heuristic as isOriginZone
+                for (const [zone, config] of dzToConfig) {
+                    if (config && config.copyMode && config.items.some(i => i[ITEM_ID_KEY] === draggedElData[ITEM_ID_KEY])) {
+                        originDropZone = zone;
+                        break;
+                    }
+                }
+            }
             // letting the origin drop zone know the element was permanently taken away
-            dispatchFinalizeEvent(originDropZone, dzToConfig.get(originDropZone).items, {
-                trigger: TRIGGERS.DROPPED_INTO_ANOTHER,
-                id: draggedElData[ITEM_ID_KEY],
-                source: SOURCES.POINTER
-            });
+            if (dzToConfig.has(originDropZone)) {
+                dispatchFinalizeEvent(originDropZone, dzToConfig.get(originDropZone).items, {
+                    trigger: TRIGGERS.DROPPED_INTO_ANOTHER,
+                    id: draggedElData[ITEM_ID_KEY],
+                    source: SOURCES.POINTER
+                });
+            }
         }
         // In edge cases the dom might have not been updated yet so we can't rely on data list index
         const domShadowEl = Array.from(shadowElDropZone.children).find(c => c.getAttribute(SHADOW_ELEMENT_ATTRIBUTE_NAME));
@@ -320,8 +433,18 @@ function cleanupPostDrop() {
     if (draggedEl && draggedEl.remove) {
         draggedEl.remove();
     }
+    // In copyMode, DON'T remove originalDragTarget - it should stay in the origin zone
+    // because the items array wasn't modified, so Svelte won't re-render to restore it
     if (originalDragTarget && originalDragTarget.remove) {
-        originalDragTarget.remove();
+        const originConfig = originDropZone && dzToConfig.has(originDropZone) ? dzToConfig.get(originDropZone) : null;
+        if (!originConfig || !originConfig.copyMode) {
+            originalDragTarget.remove();
+        } else {
+            // In copyMode, just unhide the element if it was hidden
+            if (originalDragTarget.style.display === "none") {
+                originalDragTarget.style.display = "";
+            }
+        }
     }
 
     draggedEl = undefined;
@@ -503,12 +626,31 @@ export function dndzone(node, options) {
         useCursorForDetectionActive = useCursorForDetection;
 
         // creating the draggable element
-        // save the original element rect before it gets hidden/moved, for transformDraggedElement
         originalElementRect = originalDragTarget.getBoundingClientRect();
         draggedEl = createDraggedElementFrom(originalDragTarget, centreDraggedOnCursor && currentMousePosition);
         originDropZoneRoot.appendChild(draggedEl);
+
+        // In copyMode, apply transformDraggedElement immediately since there won't be a shadow item
+        // to trigger this in the configure loop later
+        if (config.copyMode && config.transformDraggedElement) {
+            config.transformDraggedElement(draggedEl, draggedElData, currentIdx, {
+                dragStartMousePosition,
+                originalElementRect
+            });
+        }
+
         // We will keep the original dom node in the dom because touch events keep firing on it, we want to re-add it after the framework removes it
         function keepOriginalElementInDom() {
+            // Guard: If drag was cancelled or element was cleaned up, bail out
+            if (!originalDragTarget) return;
+
+            // In copyMode, the original element won't be removed from DOM (items array is unchanged),
+            // so we can't wait for parentElement to become null. Start watching immediately.
+            if (config.copyMode) {
+                watchDraggedElement();
+                return;
+            }
+
             if (!originalDragTarget.parentElement) {
                 originalDragTarget.setAttribute(ORIGINAL_DRAGGED_ITEM_MARKER_ATTRIBUTE, true);
                 originDropZoneRoot.appendChild(originalDragTarget);
@@ -532,7 +674,10 @@ export function dndzone(node, options) {
         );
 
         // removing the original element by removing its data entry
-        items.splice(currentIdx, 1, shadowElData);
+        // In copyMode, we keep the original item in place (no splice), so the source zone stays unchanged
+        if (!config.copyMode) {
+            items.splice(currentIdx, 1, shadowElData);
+        }
         unlockOriginDzMinDimensions = preventShrinking(originDropZone);
 
         dispatchConsiderEvent(originDropZone, items, {trigger: TRIGGERS.DRAG_STARTED, id: draggedElData[ITEM_ID_KEY], source: SOURCES.POINTER});
@@ -557,6 +702,7 @@ export function dndzone(node, options) {
         centreDraggedOnCursor = false,
         useCursorForDetection = false,
         dropAnimationDisabled = false,
+        copyMode = false,
         delayTouchStart: delayTouchStartOpt = false
     }) {
         config.dropAnimationDurationMs = dropAnimationDurationMs;
@@ -580,6 +726,7 @@ export function dndzone(node, options) {
         config.centreDraggedOnCursor = centreDraggedOnCursor;
         config.useCursorForDetection = useCursorForDetection;
         config.dropAnimationDisabled = dropAnimationDisabled;
+        config.copyMode = copyMode;
 
         // realtime update for dropTargetStyle
         if (
