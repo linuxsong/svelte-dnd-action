@@ -68,6 +68,11 @@ export interface Options<T extends Item = Item> {
      * Use cursor position instead of dragged element center for drop zone detection
      */
     useCursorForDetection?: boolean;
+    /**
+     * Prevents the original element from being hidden during drag.
+     * Useful for toolbox scenarios where items should be copied rather than moved.
+     */
+    copyMode?: boolean;
 }
 
 export interface DndZoneAttributes<T> {
