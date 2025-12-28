@@ -35,11 +35,10 @@ export function observe(draggedEl, dropZones, intervalMs = INTERVAL_MS, multiScr
      * The main function in this module. Tracks where everything is/ should be a take the actions
      */
     function andNow() {
-        // Use cursor position if provided, otherwise use element center
-        const cursorPos = getCursorPosition ? getCursorPosition() : null;
-        const currentCenterOfDragged = cursorPos
-            ? {x: cursorPos.x + window.scrollX, y: cursorPos.y + window.scrollY}
-            : findCenterOfElement(draggedEl);
+        // Detection point: cursor position if provided, otherwise null (will use element center)
+        const detectionPoint = getCursorPosition ? getCursorPosition() : null;
+        // Reference point for throttling position changes
+        const currentCenterOfDragged = detectionPoint || findCenterOfElement(draggedEl);
         const scrolled = multiScroller.multiScrollIfNeeded();
         // we only want to make a new decision after the element was moved a bit to prevent flickering
         if (
@@ -62,8 +61,8 @@ export function observe(draggedEl, dropZones, intervalMs = INTERVAL_MS, multiScr
         let isDraggedInADropZone = false;
         for (const dz of dropZonesFromDeepToShallow) {
             if (scrolled) resetIndexesCache();
-            // Pass cursor position to findWouldBeIndex when using cursor-based detection
-            const indexObj = findWouldBeIndex(draggedEl, dz, cursorPos ? currentCenterOfDragged : null);
+            // Pass detection point to findWouldBeIndex (null means use element center)
+            const indexObj = findWouldBeIndex(draggedEl, dz, detectionPoint);
             if (indexObj === null) {
                 // it is not inside
                 continue;
