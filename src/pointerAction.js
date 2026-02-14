@@ -64,6 +64,7 @@ let multiScroller;
 let touchDragHoldTimer;
 let touchHoldElapsed = false;
 let useCursorForDetectionActive = false;
+let originalElementRect;
 
 // a map from type to a set of drop-zones
 const typeToDropZones = new Map();
