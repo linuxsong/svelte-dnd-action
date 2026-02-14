@@ -786,7 +786,10 @@ export function dndzone(node, options) {
                 if (!morphDisabled) {
                     morphDraggedElementToBeLike(draggedEl, draggableEl, currentMousePosition.x, currentMousePosition.y);
                 }
-                config.transformDraggedElement(draggedEl, draggedElData, idx);
+                config.transformDraggedElement(draggedEl, draggedElData, idx, {
+                    dragStartMousePosition,
+                    originalElementRect
+                });
                 decorateShadowEl(draggableEl);
                 continue;
             }
